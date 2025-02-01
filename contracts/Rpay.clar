@@ -6,6 +6,7 @@
 (define-data-var payment-amount uint u0) ;; Amount to be transferred in each payment
 (define-data-var payment-interval uint u0) ;; Interval between payments in seconds
 (define-data-var next-payment-time uint u0) ;; Timestamp for the next payment
+(define-data-var paused bool false) ;; Flag to pause payments
 
 ;; Error codes
 (define-constant ERR-UNAUTHORIZED (err u401))
@@ -14,6 +15,7 @@
 (define-constant ERR-TRANSFER-FAILED (err u404))
 (define-constant ERR-NOT-DUE (err u405))
 (define-constant ERR-INVALID-PRINCIPAL (err u406))
+(define-constant ERR-PAUSED (err u407))
 
 ;; Allow the admin to configure recurring payments.
 (define-public (configure-recurring-payment (new-recipient principal) (amount uint) (interval uint))
@@ -33,6 +35,7 @@
     (var-set payment-amount amount)
     (var-set payment-interval interval)
     (var-set next-payment-time (+ stacks-block-height interval))
+    (var-set paused false) ;; Ensure payments are not paused after configuration
     
     (ok true)
   )
@@ -45,6 +48,9 @@
         (amount (var-get payment-amount))
         (payment-recipient (var-get recipient)))
     
+    ;; Check if payments are paused
+    (asserts! (not (var-get paused)) ERR-PAUSED)
+    
     ;; Check if it's time for the next payment.
     (asserts! (>= current-time next-payment) ERR-NOT-DUE)
     
@@ -56,6 +62,37 @@
       error ERR-TRANSFER-FAILED
     )
   )
+)
+
+
+;; Allow the admin to pause and resume payments.
+(define-public (pause-payments (pause bool))
+  (begin
+    (asserts! (is-eq tx-sender (var-get admin)) ERR-UNAUTHORIZED)
+    (var-set paused pause)
+    (ok true)
+  )
+)
+
+;; Allow the admin to update the payment amount.
+(define-public (update-payment-amount (amount uint))
+    (begin
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-UNAUTHORIZED)
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+        (var-set payment-amount amount)
+        (ok true)
+    )
+)
+
+;; Allow the admin to update the payment interval.
+(define-public (update-payment-interval (interval uint))
+    (begin
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-UNAUTHORIZED)
+        (asserts! (> interval u0) ERR-INVALID-INTERVAL)
+        (var-set payment-interval interval)
+        (var-set next-payment-time (+ stacks-block-height interval)) ;; Reset next payment time
+        (ok true)
+    )
 )
 
 ;; Allow the admin to update the recipient.
@@ -84,6 +121,7 @@
     (var-set payment-amount u0)
     (var-set payment-interval u0)
     (var-set next-payment-time u0)
+    (var-set paused false) ;; Reset paused state
     (ok true)
   )
 )
@@ -92,4 +130,3 @@
 (define-private (is-valid-principal? (principal principal))
   (is-ok (principal-destruct? principal))
 )
-
